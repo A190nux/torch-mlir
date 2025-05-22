@@ -671,20 +671,7 @@ class FxImporter:
                     user_outputs.append(None)  # Placeholder for constant
                     
                     # Determine the appropriate type for the constant
-                    if arg.value is None:
-                        user_output_types.append(IrType.parse("!torch.none", context=self._c))
-                    elif isinstance(arg.value, bool):
-                        user_output_types.append(IrType.parse("!torch.bool", context=self._c))
-                    elif isinstance(arg.value, int):
-                        user_output_types.append(IrType.parse("!torch.int", context=self._c))
-                    elif isinstance(arg.value, float):
-                        user_output_types.append(IrType.parse("!torch.float", context=self._c))
-                    elif isinstance(arg.value, str):
-                        user_output_types.append(IrType.parse("!torch.str", context=self._c))
-                    else:
-                        raise NotImplementedError(
-                            f"ConstantArgument with value type {type(arg.value)} not yet supported: {arg.value}"
-                        )
+                    user_output_types.append(self._cc.value_info_to_type(arg.value))
                 else:
                     output_producer_node = all_producer_nodes[arg.name]
                     user_outputs.append(output_producer_node)
