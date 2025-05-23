@@ -652,6 +652,7 @@ class FxImporter:
         parameter_bindings: Dict[Node, Tuple[Any, InputInfo]] = {}
         buffer_bindings: Dict[Node, Tuple[Any, InputInfo]] = {}
         constant_output_values: Dict[int, Any] = {}
+        constant_values: Dict[Node, Any] = {}
 
         # Derive user outputs that we preserve. These will be nodes of the
         # producer for the output.
@@ -699,7 +700,7 @@ class FxImporter:
                     
                     # We'll create the constant value later when the function is created
                     # For now, just remember the node and value
-                    constant_tensors[placeholder_node] = arg.value
+                    constant_values[placeholder_node] = arg.value
                 else:
                     placeholder_node = placeholder_nodes[arg.name]
                     mutable = placeholder_node.name in mutated_user_inputs
@@ -797,6 +798,9 @@ class FxImporter:
         for constant_node, constant_tensor in constant_tensors.items():
             node_importer.import_constant(loc, constant_node, constant_tensor)
 
+        for constant_node, constant_value in constant_values.items():
+            node_importer.import_constant(loc, constant_node, constant_value)
+
         # Bind user inputs to IR values.
         for user_input_node, block_arg_value in zip(user_inputs, entry_block.arguments):
             if user_input_node.name in mutated_user_inputs:
@@ -830,18 +834,17 @@ class FxImporter:
                 if i in constant_output_values:
                     # Create a constant operation for this output
                     constant_value = constant_output_values[i]
-                    
                     # Use the existing literal import infrastructure
                     constant_value_op = node_importer._import_literal(constant_value)
                     return_values.append(constant_value_op)
-                elif output is None:
-                    # Handle None placeholder without a constant value
-                    # This shouldn't happen in normal operation, but we'll add a safeguard
-                    none_op = Operation.create("torch.constant.none", results=[IrType.parse("!torch.none", context=self._c)]).result
-                    return_values.append(none_op)
-                else:
+                elif output is not None:
                     # Regular node output
                     return_values.append(node_importer.resolve_node_value(output))
+                else:
+                    # Handle None placeholder without a constant value
+                    # This shouldn't happen in normal operation, but we'll add a safeguard
+                    none_op = Operation.create("torch.constant.none", results=[self._cc.torch_none_type]).result
+                    return_values.append(none_op)
             
             # Create the return operation
             func_dialect.ReturnOp(return_values, loc=loc)
