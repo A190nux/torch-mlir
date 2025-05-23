@@ -666,19 +666,19 @@ class FxImporter:
                     raise NotImplementedError(
                         f"OutputKind.USER_OUTPUT for {type(arg)}: {arg}"
                     )
-                if isinstance(arg, ConstantArgument):
-                    # For constant outputs, store the value and add a placeholder
-                    constant_output_values[i] = arg.value
-                    user_outputs.append(None)  # Placeholder for constant
-                    
-                    # Determine the appropriate type for the constant
-                    user_output_types.append(self._cc.value_info_to_type(arg.value))
-                else:
+                if isinstance(arg, (TensorArgument, SymIntArgument)):
                     output_producer_node = all_producer_nodes[arg.name]
                     user_outputs.append(output_producer_node)
                     user_output_types.append(
                         self._cc.node_val_to_type(output_producer_node)
                     )
+                elif isinstance(arg, ConstantArgument):
+                    # For constant outputs, store the value and add a placeholder
+                    constant_output_values[i] = arg.value
+                    # Placeholder for constant
+                    user_outputs.append(None)
+                    # Determine the appropriate type for the constant
+                    user_output_types.append(self._cc.value_info_to_type(arg.value))
             elif kind == OutputKind.BUFFER_MUTATION and isinstance(arg, TensorArgument):
                 mutable_buffer_target_producers[output_spec.target] = arg.name
 
@@ -693,7 +693,14 @@ class FxImporter:
                     raise NotImplementedError(
                         f"InputKind.USER_INPUT for {type(arg)}: {arg}"
                     )
-                if isinstance(arg, ConstantArgument):
+                if isinstance(arg, (TensorArgument, SymIntArgument)):
+                    placeholder_node = placeholder_nodes[arg.name]
+                    mutable = placeholder_node.name in mutated_user_inputs
+                    user_inputs.append(placeholder_node)
+                    user_input_types.append(
+                        self._cc.node_val_to_type(placeholder_node, mutable=mutable)
+                    )
+                elif isinstance(arg, ConstantArgument):
                     # For constant inputs, we'll handle them separately
                     # We don't add them to user_inputs since they don't need function parameters
                     placeholder_node = placeholder_nodes[arg.name]
@@ -701,13 +708,6 @@ class FxImporter:
                     # We'll create the constant value later when the function is created
                     # For now, just remember the node and value
                     constant_values[placeholder_node] = arg.value
-                else:
-                    placeholder_node = placeholder_nodes[arg.name]
-                    mutable = placeholder_node.name in mutated_user_inputs
-                    user_inputs.append(placeholder_node)
-                    user_input_types.append(
-                        self._cc.node_val_to_type(placeholder_node, mutable=mutable)
-                    )
             elif input_spec.kind == InputKind.CONSTANT_TENSOR and isinstance(
                 arg, TensorArgument
             ):
