@@ -171,3 +171,23 @@ def test_mutable_buffer():
     )
     print(m)
     m.operation.verify()
+
+
+@run
+# CHECK-LABEL: test_constant_arguments
+def test_constant_arguments():
+    class ConstantOutputModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.scale = 0.5
+
+        def forward(self, x, y=2):
+            return x * self.scale, self.scale, 42, "hello", None, y
+
+    m = fx.export_and_import(
+        ConstantOutputModule(), 
+        torch.randn(3, 4),
+        experimental_support_mutation=True
+    )
+    print(m)
+    m.operation.verify()
