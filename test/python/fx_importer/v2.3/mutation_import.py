@@ -372,20 +372,19 @@ def test_constant_edge_cases():
 # CHECK: func.func @main
 # CHECK: return
 def test_attention_like_constant():
-    """Test case similar to your pytorch_attention.py - need_weights=False scenario"""
+    """Test case similar to pytorch_attention.py - using actual MultiheadAttention"""
     class AttentionLikeConstantModule(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.embed_dim = 64
+            self.attn = torch.nn.MultiheadAttention(
+                embed_dim=64, 
+                num_heads=1, 
+                dropout=0.1,
+                batch_first=True
+            )
 
         def forward(self, query, key, value, need_weights=False):
-            # Simulate attention computation
-            attn_output = torch.matmul(query, value.transpose(-2, -1))
-            
-            # Return None when need_weights=False (creates ConstantArgument)
-            attn_weights = None if not need_weights else torch.ones_like(attn_output)
-            
-            return attn_output, attn_weights
+            return self.attn(query, key, value, need_weights=need_weights)
 
     m = fx.export_and_import(
         AttentionLikeConstantModule(), 
