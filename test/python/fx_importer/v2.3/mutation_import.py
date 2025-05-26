@@ -191,3 +191,208 @@ def test_constant_arguments():
     )
     print(m)
     m.operation.verify()
+
+@run
+# CHECK-LABEL: test_constant_input_single
+# CHECK: func.func @main
+# CHECK: return
+def test_constant_input_single():
+    """Test case 1: Single input ConstantArgument (y=2)"""
+    class SingleConstantInputModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, y=2):  # Single constant input
+            return x * y
+
+    m = fx.export_and_import(
+        SingleConstantInputModule(), 
+        torch.randn(3, 4),
+        experimental_support_mutation=True
+    )
+    print(m)
+    m.operation.verify()
+
+
+@run
+# CHECK-LABEL: test_constant_output_single
+# CHECK: func.func @main
+# CHECK: return
+def test_constant_output_single():
+    """Test case 2: Single output ConstantArgument (self.scale)"""
+    class SingleConstantOutputModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.scale = 0.5  # Single constant output
+
+        def forward(self, x):
+            scaled = x * self.scale
+            return scaled, self.scale  # Return tensor + constant
+
+    m = fx.export_and_import(
+        SingleConstantOutputModule(), 
+        torch.randn(3, 4),
+        experimental_support_mutation=True
+    )
+    print(m)
+    m.operation.verify()
+
+
+@run
+# CHECK-LABEL: test_constant_input_multiple
+# CHECK: func.func @main
+# CHECK: return
+def test_constant_input_multiple():
+    """Test case 3: Multiple input ConstantArguments"""
+    class MultipleConstantInputModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, scale=2.0, offset=1.0, multiplier=3):  # Multiple constant inputs
+            return x * scale + offset * multiplier
+
+    m = fx.export_and_import(
+        MultipleConstantInputModule(), 
+        torch.randn(3, 4),
+        experimental_support_mutation=True
+    )
+    print(m)
+    m.operation.verify()
+
+
+@run
+# CHECK-LABEL: test_constant_output_multiple
+# CHECK: func.func @main
+# CHECK: return
+def test_constant_output_multiple():
+    """Test case 4: Multiple output ConstantArguments"""
+    class MultipleConstantOutputModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.scale = 0.5
+            self.name = "model"
+            self.version = 42
+
+        def forward(self, x):
+            result = x * self.scale
+            # Return tensor + multiple constants
+            return result, self.scale, self.name, self.version, True, None
+
+    m = fx.export_and_import(
+        MultipleConstantOutputModule(), 
+        torch.randn(3, 4),
+        experimental_support_mutation=True
+    )
+    print(m)
+    m.operation.verify()
+
+
+@run
+# CHECK-LABEL: test_constant_input_output_combined
+# CHECK: func.func @main
+# CHECK: return
+def test_constant_input_output_combined():
+    """Test case 5: Multiple input AND output ConstantArguments combined"""
+    class CombinedConstantModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.base_scale = 0.5
+            self.model_name = "combined_model"
+
+        def forward(self, x, user_scale=2.0, add_bias=True, bias_value=1.0):
+            # Use both class constants and input constants
+            if add_bias:
+                result = (x * self.base_scale * user_scale) + bias_value
+            else:
+                result = x * self.base_scale * user_scale
+            
+            # Return mix of tensors and constants (both class and input)
+            return (
+                result,              # tensor
+                self.base_scale,     # class constant
+                self.model_name,     # class constant  
+                user_scale,          # input constant
+                add_bias,            # input constant
+                bias_value,          # input constant
+                None                 # None constant
+            )
+
+    m = fx.export_and_import(
+        CombinedConstantModule(), 
+        torch.randn(3, 4),
+        experimental_support_mutation=True
+    )
+    print(m)
+    m.operation.verify()
+
+
+@run
+# CHECK-LABEL: test_constant_edge_cases
+# CHECK: func.func @main
+# CHECK: return
+def test_constant_edge_cases():
+    """Test edge cases: different constant types and None values"""
+    class EdgeCaseConstantModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.float_val = 3.14
+            self.int_val = 42
+            self.str_val = "test"
+            self.bool_val = True
+            self.none_val = None
+
+        def forward(self, x, input_none=None, input_str="default"):
+            result = x * self.float_val
+            
+            # Return all different constant types
+            return (
+                result,           # tensor
+                self.float_val,   # float
+                self.int_val,     # int
+                self.str_val,     # string
+                self.bool_val,    # bool
+                self.none_val,    # None from class
+                input_none,       # None from input
+                input_str,        # string from input
+                0,                # literal int
+                False             # literal bool
+            )
+
+    m = fx.export_and_import(
+        EdgeCaseConstantModule(), 
+        torch.randn(3, 4),
+        experimental_support_mutation=True
+    )
+    print(m)
+    m.operation.verify()
+
+
+@run
+# CHECK-LABEL: test_attention_like_constant
+# CHECK: func.func @main
+# CHECK: return
+def test_attention_like_constant():
+    """Test case similar to your pytorch_attention.py - need_weights=False scenario"""
+    class AttentionLikeConstantModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embed_dim = 64
+
+        def forward(self, query, key, value, need_weights=False):
+            # Simulate attention computation
+            attn_output = torch.matmul(query, value.transpose(-2, -1))
+            
+            # Return None when need_weights=False (creates ConstantArgument)
+            attn_weights = None if not need_weights else torch.ones_like(attn_output)
+            
+            return attn_output, attn_weights
+
+    m = fx.export_and_import(
+        AttentionLikeConstantModule(), 
+        torch.randn(1, 10, 64),  # query
+        torch.randn(1, 10, 64),  # key  
+        torch.randn(1, 10, 64),  # value
+        experimental_support_mutation=True
+    )
+    print(m)
+    m.operation.verify()
