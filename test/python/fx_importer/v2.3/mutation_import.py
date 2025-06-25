@@ -174,29 +174,10 @@ def test_mutable_buffer():
 
 
 @run
-# CHECK-LABEL: test_constant_arguments
-def test_constant_arguments():
-    class ConstantOutputModule(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.scale = 0.5
-
-        def forward(self, x, y=2):
-            return x * self.scale, self.scale, 42, "hello", None, y
-
-    m = fx.export_and_import(
-        ConstantOutputModule(), 
-        torch.randn(3, 4),
-        experimental_support_mutation=True
-    )
-    print(m)
-    m.operation.verify()
-
-@run
-# CHECK-LABEL: test_constant_input_single
+# CHECK-LABEL: test_single_input_ConstantArgument
 # CHECK: func.func @main
 # CHECK: return
-def test_constant_input_single():
+def test_single_input_ConstantArgument():
     """Test case 1: Single input ConstantArgument (y=2)"""
     class SingleConstantInputModule(torch.nn.Module):
         def __init__(self):
@@ -215,10 +196,10 @@ def test_constant_input_single():
 
 
 @run
-# CHECK-LABEL: test_constant_output_single
+# CHECK-LABEL: test_single_output_ConstantArgument
 # CHECK: func.func @main
 # CHECK: return
-def test_constant_output_single():
+def test_single_output_ConstantArgument():
     """Test case 2: Single output ConstantArgument (self.scale)"""
     class SingleConstantOutputModule(torch.nn.Module):
         def __init__(self):
@@ -239,10 +220,10 @@ def test_constant_output_single():
 
 
 @run
-# CHECK-LABEL: test_constant_input_multiple
+# CHECK-LABEL: test_multiple_input_ConstantArgument
 # CHECK: func.func @main
 # CHECK: return
-def test_constant_input_multiple():
+def test_multiple_input_ConstantArgument():
     """Test case 3: Multiple input ConstantArguments"""
     class MultipleConstantInputModule(torch.nn.Module):
         def __init__(self):
@@ -261,10 +242,10 @@ def test_constant_input_multiple():
 
 
 @run
-# CHECK-LABEL: test_constant_output_multiple
+# CHECK-LABEL: test_multiple_output_ConstantArgument
 # CHECK: func.func @main
 # CHECK: return
-def test_constant_output_multiple():
+def test_multiple_output_ConstantArgument():
     """Test case 4: Multiple output ConstantArguments"""
     class MultipleConstantOutputModule(torch.nn.Module):
         def __init__(self):
@@ -288,10 +269,10 @@ def test_constant_output_multiple():
 
 
 @run
-# CHECK-LABEL: test_constant_input_output_combined
+# CHECK-LABEL: test_input_output_ConstantArgument
 # CHECK: func.func @main
 # CHECK: return
-def test_constant_input_output_combined():
+def test_input_output_ConstantArgument():
     """Test case 5: Multiple input AND output ConstantArguments combined"""
     class CombinedConstantModule(torch.nn.Module):
         def __init__(self):
@@ -300,21 +281,20 @@ def test_constant_input_output_combined():
             self.model_name = "combined_model"
 
         def forward(self, x, user_scale=2.0, add_bias=True, bias_value=1.0):
-            # Use both class constants and input constants
             if add_bias:
                 result = (x * self.base_scale * user_scale) + bias_value
             else:
                 result = x * self.base_scale * user_scale
             
-            # Return mix of tensors and constants (both class and input)
+            # Return mix of tensors and constants (both output and input)
             return (
                 result,              # tensor
-                self.base_scale,     # class constant
-                self.model_name,     # class constant  
-                user_scale,          # input constant
-                add_bias,            # input constant
-                bias_value,          # input constant
-                None                 # None constant
+                self.base_scale,     # constantArgument output
+                self.model_name,     # constantArgument output
+                user_scale,          # constantArgument input
+                add_bias,            # constantArgument input
+                bias_value,          # constantArgument input
+                None                 # constantArgument literal (output)
             )
 
     m = fx.export_and_import(
@@ -327,10 +307,10 @@ def test_constant_input_output_combined():
 
 
 @run
-# CHECK-LABEL: test_constant_edge_cases
+# CHECK-LABEL: test_ConstantArgument_edge_cases
 # CHECK: func.func @main
 # CHECK: return
-def test_constant_edge_cases():
+def test_ConstantArgument_edge_cases():
     """Test edge cases: different constant types and None values"""
     class EdgeCaseConstantModule(torch.nn.Module):
         def __init__(self):
@@ -344,16 +324,16 @@ def test_constant_edge_cases():
         def forward(self, x, input_none=None, input_str="default"):
             result = x * self.float_val
             
-            # Return all different constant types
+            # Return all different ConstantArgument types
             return (
                 result,           # tensor
-                self.float_val,   # float
-                self.int_val,     # int
-                self.str_val,     # string
-                self.bool_val,    # bool
-                self.none_val,    # None from class
-                input_none,       # None from input
-                input_str,        # string from input
+                self.float_val,   # float output constantArgument
+                self.int_val,     # int output constantArgument
+                self.str_val,     # string output constantArgument
+                self.bool_val,    # bool output constantArgument
+                self.none_val,    # None output constantArgument
+                input_none,       # None input constantArgument
+                input_str,        # string input constantArgument
                 0,                # literal int
                 False             # literal bool
             )
@@ -368,11 +348,14 @@ def test_constant_edge_cases():
 
 
 @run
-# CHECK-LABEL: test_attention_like_constant
+# CHECK-LABEL: test_ConstantArgument_from_attention_layer
 # CHECK: func.func @main
 # CHECK: return
-def test_attention_like_constant():
-    """Test case similar to pytorch_attention.py - using actual MultiheadAttention"""
+def test_ConstantArgument_from_attention_layer():
+    """
+    Test case using actual MultiheadAttention where a constantArgument appears automatically
+    due to returning the attention layer without the weights (need_weights=False)
+    """
     class AttentionLikeConstantModule(torch.nn.Module):
         def __init__(self):
             super().__init__()

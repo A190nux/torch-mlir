@@ -652,7 +652,7 @@ class FxImporter:
         parameter_bindings: Dict[Node, Tuple[Any, InputInfo]] = {}
         buffer_bindings: Dict[Node, Tuple[Any, InputInfo]] = {}
         constant_output_values: Dict[int, Any] = {}
-        constant_values: Dict[Node, Any] = {}
+        constant_input_values: Dict[Node, Any] = {}
 
         # Derive user outputs that we preserve. These will be nodes of the
         # producer for the output.
@@ -673,11 +673,10 @@ class FxImporter:
                         self._cc.node_val_to_type(output_producer_node)
                     )
                 elif isinstance(arg, ConstantArgument):
-                    # For constant outputs, store the value and add a placeholder
+                    # Constant Outputs don't have a node so we will only store their values
                     constant_output_values[i] = arg.value
-                    # Placeholder for constant
+                    # Placeholder for constant outputs in the node list
                     user_outputs.append(None)
-                    # Determine the appropriate type for the constant
                     user_output_types.append(self._cc.value_info_to_type(arg.value))
             elif kind == OutputKind.BUFFER_MUTATION and isinstance(arg, TensorArgument):
                 mutable_buffer_target_producers[output_spec.target] = arg.name
@@ -693,8 +692,8 @@ class FxImporter:
                     raise NotImplementedError(
                         f"InputKind.USER_INPUT for {type(arg)}: {arg}"
                     )
+                placeholder_node = placeholder_nodes[arg.name]
                 if isinstance(arg, (TensorArgument, SymIntArgument)):
-                    placeholder_node = placeholder_nodes[arg.name]
                     mutable = placeholder_node.name in mutated_user_inputs
                     user_inputs.append(placeholder_node)
                     user_input_types.append(
@@ -702,12 +701,8 @@ class FxImporter:
                     )
                 elif isinstance(arg, ConstantArgument):
                     # For constant inputs, we'll handle them separately
-                    # We don't add them to user_inputs since they don't need function parameters
-                    placeholder_node = placeholder_nodes[arg.name]
-                    
-                    # We'll create the constant value later when the function is created
-                    # For now, just remember the node and value
-                    constant_values[placeholder_node] = arg.value
+                    # We don't add them to user_inputs since they don't need function parameters and can't be mutable
+                    constant_input_values[placeholder_node] = arg.value
             elif input_spec.kind == InputKind.CONSTANT_TENSOR and isinstance(
                 arg, TensorArgument
             ):
@@ -798,7 +793,7 @@ class FxImporter:
         for constant_node, constant_tensor in constant_tensors.items():
             node_importer.import_constant(loc, constant_node, constant_tensor)
 
-        for constant_node, constant_value in constant_values.items():
+        for constant_node, constant_value in constant_input_values.items():
             node_importer.import_constant(loc, constant_node, constant_value)
 
         # Bind user inputs to IR values.
@@ -827,27 +822,9 @@ class FxImporter:
             skip_placeholders_outputs=True,
             import_symbolic_shape_expressions=import_symbolic_shape_expressions,
         )
-        # Create return values, handling constants specially
-        with loc, InsertionPoint(entry_block):
-            return_values = []
-            for i, output in enumerate(user_outputs):
-                if i in constant_output_values:
-                    # Create a constant operation for this output
-                    constant_value = constant_output_values[i]
-                    # Use the existing literal import infrastructure
-                    constant_value_op = node_importer._import_literal(constant_value)
-                    return_values.append(constant_value_op)
-                elif output is not None:
-                    # Regular node output
-                    return_values.append(node_importer.resolve_node_value(output))
-                else:
-                    # Handle None placeholder without a constant value
-                    # This shouldn't happen in normal operation, but we'll add a safeguard
-                    none_op = Operation.create("torch.constant.none", results=[self._cc.torch_none_type]).result
-                    return_values.append(none_op)
-            
-            # Create the return operation
-            func_dialect.ReturnOp(return_values, loc=loc)
+
+        # Call the return function that handles both nodes and constant values
+        node_importer.return_nodes(loc, user_outputs, constant_output_values)
 
         self.symbol_table.insert(func_op)
         return func_op
@@ -1466,6 +1443,23 @@ class GraphNodeImporter:
     def return_node_values(self, loc, nodes: List[Node]):
         with loc, InsertionPoint(self._b):
             operands = [self.resolve_node_value(n) for n in nodes]
+            func_dialect.ReturnOp(operands, loc=loc)
+
+    def return_nodes(self, loc, nodes: List[Node], constants: Dict[int, Any]):
+        with loc, InsertionPoint(self._b):
+            operands = []
+            for i, output in enumerate(nodes):
+                if output is not None:
+                    # Regular node output
+                    operands.append(self.resolve_node_value(output))
+                else:
+                    # Create a constant operation for this output
+                    constant_value = constants[i]
+                    # Use the existing literal import infrastructure
+                    constant_value_op = self._import_literal(constant_value)
+                    operands.append(constant_value_op)
+            
+            # Create the return operation
             func_dialect.ReturnOp(operands, loc=loc)
 
     def import_nodes(
