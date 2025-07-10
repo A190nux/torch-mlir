@@ -327,7 +327,7 @@ bool Torch::isViewLikeOp(Operation *op) {
              AtenNarrowOp, AtenNarrowTensorOp, AtenToDeviceOp, PrimsSqueezeOp,
              AtenMovedimIntOp, PrimsViewOfOp, AtenRealOp, AtenImagOp,
              PrimsSplitDimOp, AtenViewAsComplexOp, AtenViewAsRealOp,
-             AtenPixelShuffleOp, AtenDiagonalOp, AtenUnfoldOp>(op);
+             AtenPixelShuffleOp, AtenPixelUnshuffleOp, AtenDiagonalOp, AtenUnfoldOp>(op);
 }
 
 Value Torch::getConstantWithGivenDtypeAndValue(PatternRewriter &rewriter,
