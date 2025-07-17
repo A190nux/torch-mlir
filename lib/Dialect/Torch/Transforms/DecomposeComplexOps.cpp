@@ -3710,19 +3710,19 @@ public:
 
 // Decompose aten.pixel_unshuffle into: prims.split_dim, aten.permute, and
 // prims.collapse operations.
-// 
+//
 // We want to do the exact opposite of aten.pixel_shuffle
 //
 // If input is a tensor of shape
-//     (*leading_dims, C, r*H, r*W),
+//     (*leading_dims, C, H*r, W*r),
 //
 // where leading_dims is of size N, then
 //    X = pixel_unshuffle(input, downscale_factor)
 //
 // gets replaced with
-//    X = input.split_dim(...)  # shape (*leading_dims, C, r, H, r*W)
-//    X = X.split_dim(...)      # shape (*leading_dims, C, r, H, r, W)
-//    X = X.permute(0, ..., N, N+1, N+3, N+2, N+4)
+//    X = input.split_dim(...)  # shape (*leading_dims, C, H, r, W*r)
+//    X = X.split_dim(...)      # shape (*leading_dims, C, H, r, W, r)
+//    X = X.permute(0, ..., N, N+2, N+4, N+1, N+3)
 //                              # shape (*leading_dims, C, r, r, H, W)
 //    X = X.collapse(...)       # shape (*leading_dims, C, r*r, H, W)
 //    X = X.collapse(...)       # shape (*leading_dims, C*r*r, H, W)
@@ -3799,8 +3799,7 @@ public:
     Value factorSquared =
         rewriter.createOrFold<AtenMulIntOp>(loc, factor, factor);
 
-    Value outC =
-        rewriter.createOrFold<AtenMulIntOp>(loc, inC, factorSquared);
+    Value outC = rewriter.createOrFold<AtenMulIntOp>(loc, inC, factorSquared);
 
     Value outH = rewriter.createOrFold<AtenFloordivIntOp>(loc, inH, factor);
     Value outW = rewriter.createOrFold<AtenFloordivIntOp>(loc, inW, factor);
@@ -3821,10 +3820,10 @@ public:
     }
 
     SmallVector<Value> partiallyExpandedShape = leadingDims;
-    partiallyExpandedShape.append({inC, factor, outH, inW});
+    partiallyExpandedShape.append({inC, outH, factor, inW});
 
     SmallVector<Value> prePermuteShape = leadingDims;
-    prePermuteShape.append({inC, factor, outH, factor, outW});
+    prePermuteShape.append({inC, outH, factor, outW, factor});
 
     SmallVector<Value> postPermuteShape = leadingDims;
     postPermuteShape.append({inC, factor, factor, outH, outW});
@@ -3837,7 +3836,7 @@ public:
 
     SmallVector<Value> permutation{dimensionConstants.begin(),
                                    dimensionConstants.begin() + nLeadingDims};
-    SmallVector<uint64_t> permutationTail{0, 1, 3, 2, 4};
+    SmallVector<uint64_t> permutationTail{0, 2, 4, 1, 3};
     for (uint64_t d : permutationTail) {
       permutation.push_back(dimensionConstants[nLeadingDims + d]);
     }
@@ -3846,18 +3845,18 @@ public:
         loc, Torch::ListType::get(Torch::IntType::get(op->getContext())),
         permutation);
 
-    // Split input channel inH -> (factor, outH)
+    // Split input channel inH -> (outH, factor)
     auto partiallyExpanded =
         rewriter
             .create<PrimsSplitDimOp>(
                 loc, getTypeFromShape(partiallyExpandedShape), inValue,
-                dimensionConstants[nLeadingDims + 1], factor)
+                dimensionConstants[nLeadingDims + 1], outH)
             .getResult();
 
-    // Split new dimension inW -> (factor, outW)
+    // Split new dimension inW -> (outW, factor)
     auto fullyExpanded = rewriter.create<PrimsSplitDimOp>(
         loc, getTypeFromShape(prePermuteShape), partiallyExpanded,
-        dimensionConstants[nLeadingDims + 3], factor);
+        dimensionConstants[nLeadingDims + 3], outW);
 
     // Perform the permutation
     auto permuted =
@@ -3872,8 +3871,7 @@ public:
 
     // Collapse back to original rank
     rewriter.replaceOpWithNewOp<PrimsCollapseOp>(
-        op, op.getType(), partiallyCollapsed,
-        dimensionConstants[nLeadingDims],
+        op, op.getType(), partiallyCollapsed, dimensionConstants[nLeadingDims],
         dimensionConstants[nLeadingDims + 1]);
 
     return success();
